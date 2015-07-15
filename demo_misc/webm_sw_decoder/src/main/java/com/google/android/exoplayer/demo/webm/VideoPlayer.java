@@ -15,16 +15,17 @@
  */
 package com.google.android.exoplayer.demo.webm;
 
+import com.google.android.exoplayer.AspectRatioFrameLayout;
 import com.google.android.exoplayer.ExoPlaybackException;
 import com.google.android.exoplayer.ExoPlayer;
 import com.google.android.exoplayer.TrackRenderer;
-import com.google.android.exoplayer.VideoSurfaceView;
 import com.google.android.exoplayer.ext.opus.LibopusAudioTrackRenderer;
 import com.google.android.exoplayer.ext.vp9.LibvpxVideoTrackRenderer;
 import com.google.android.exoplayer.ext.vp9.VpxDecoderException;
 import com.google.android.exoplayer.ext.vp9.VpxVideoSurfaceView;
 import com.google.android.exoplayer.extractor.ExtractorSampleSource;
 import com.google.android.exoplayer.extractor.webm.WebmExtractor;
+import com.google.android.exoplayer.upstream.DefaultAllocator;
 import com.google.android.exoplayer.upstream.DefaultUriDataSource;
 import com.google.android.exoplayer.util.PlayerControl;
 import com.google.android.exoplayer.util.Util;
@@ -36,6 +37,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.MotionEvent;
 import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnTouchListener;
@@ -56,7 +58,9 @@ public class VideoPlayer extends Activity implements OnClickListener,
   public static final String USE_OPENGL_ID_EXTRA = "use_opengl";
 
   private static final int FILE_PICKER_REQUEST = 1;
-  private static final int EXTRACTOR_BUFFER_SIZE = 10 * 1024 * 1024;
+  private static final int BUFFER_SEGMENT_SIZE = 64 * 1024;
+  private static final int BUFFER_SEGMENT_COUNT = 160;
+
 
   private boolean isDash;
   private String manifestUrl;
@@ -66,7 +70,8 @@ public class VideoPlayer extends Activity implements OnClickListener,
   private ExoPlayer player;
   private Handler handler;
   private MediaController mediaController;
-  private VideoSurfaceView videoSurfaceView;
+  private AspectRatioFrameLayout videoFrame;
+  private SurfaceView surfaceView;
   private VpxVideoSurfaceView vpxVideoSurfaceView;
   private TextView debugInfoView;
   private TextView playerStateView;
@@ -98,7 +103,8 @@ public class VideoPlayer extends Activity implements OnClickListener,
 
     mediaController = new MediaController(this);
     mediaController.setAnchorView(root);
-    videoSurfaceView = (VideoSurfaceView) findViewById(R.id.surface_view);
+    videoFrame = (AspectRatioFrameLayout) findViewById(R.id.video_frame);
+    surfaceView = (SurfaceView) findViewById(R.id.surface_view);
     vpxVideoSurfaceView = (VpxVideoSurfaceView) findViewById(R.id.vpx_surface_view);
     debugInfoView = (TextView) findViewById(R.id.debug_info);
     playerStateView = (TextView) findViewById(R.id.player_state);
@@ -161,17 +167,18 @@ public class VideoPlayer extends Activity implements OnClickListener,
     ExtractorSampleSource sampleSource = new ExtractorSampleSource(
         Uri.fromFile(new File(filename)),
         new DefaultUriDataSource(this, Util.getUserAgent(this, "ExoPlayerExtWebMDemo")),
-        new WebmExtractor(), EXTRACTOR_BUFFER_SIZE);
+        new WebmExtractor(), new DefaultAllocator(BUFFER_SEGMENT_SIZE),
+        BUFFER_SEGMENT_SIZE * BUFFER_SEGMENT_COUNT);
     TrackRenderer videoRenderer =
         new LibvpxVideoTrackRenderer(sampleSource, true, handler, this, 50);
     if (useOpenGL) {
       player.sendMessage(videoRenderer, LibvpxVideoTrackRenderer.MSG_SET_VPX_SURFACE_VIEW,
           vpxVideoSurfaceView);
-      videoSurfaceView.setVisibility(View.GONE);
+      surfaceView.setVisibility(View.GONE);
     } else {
       player.sendMessage(
           videoRenderer, LibvpxVideoTrackRenderer.MSG_SET_SURFACE,
-          videoSurfaceView.getHolder().getSurface());
+          surfaceView.getHolder().getSurface());
       vpxVideoSurfaceView.setVisibility(View.GONE);
     }
     TrackRenderer audioRenderer = new LibopusAudioTrackRenderer(sampleSource);
@@ -188,7 +195,7 @@ public class VideoPlayer extends Activity implements OnClickListener,
   }
 
   public void onRenderersBuilt(TrackRenderer[] renderers) {
-    videoSurfaceView.setVisibility(View.GONE);
+    surfaceView.setVisibility(View.GONE);
     player = ExoPlayer.Factory.newInstance(renderers.length);
     player.addListener(this);
     mediaController.setMediaPlayer(new PlayerControl(player));
@@ -206,11 +213,7 @@ public class VideoPlayer extends Activity implements OnClickListener,
 
   @Override
   public void onVideoSizeChanged(int width, int height) {
-    if (isDash || useOpenGL) {
-      vpxVideoSurfaceView.setVideoWidthHeightRatio(height == 0 ? 1 : (width * 1.0f) / height);
-    } else {
-      videoSurfaceView.setVideoWidthHeightRatio(height == 0 ? 1 : (width * 1.0f) / height);
-    }
+    videoFrame.setAspectRatio(height == 0 ? 1 : (width * 1.0f) / height);
     debugInfoView.setText("Video: " + width + " x " + height);
   }
 
